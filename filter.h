@@ -39,7 +39,7 @@ Environment:
 // Change the following define to 1 if you want to forward
 // the request with a completion routine.
 //
-#define FORWARD_REQUEST_WITH_COMPLETION 0
+#define FORWARD_REQUEST_WITH_COMPLETION 1
 
 
 typedef struct _FILTER_EXTENSION
@@ -70,7 +70,8 @@ FilterForwardRequest(
 VOID
 FilterForwardRequestWithCompletionRoutine(
     IN WDFREQUEST Request,
-    IN WDFIOTARGET Target
+    IN WDFIOTARGET Target,
+    IN WDFCONTEXT Context
     );
 
 VOID

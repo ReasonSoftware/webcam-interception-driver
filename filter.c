@@ -28,7 +28,8 @@ Environment:
 #include "filter.h"
 
 
-#define BLOCK_IOCTL_KS_PROPERTY 1
+#define BLOCK_IOCTL_KS_PROPERTY    0
+#define BLOCK_IOCTL_KS_READ_STREAM 1
 
 
 #ifdef ALLOC_PRAGMA
@@ -545,6 +546,7 @@ Return Value:
     PFILTER_EXTENSION               filterExt;
     NTSTATUS                        status = STATUS_SUCCESS;
     WDFDEVICE                       device;
+    WDFCONTEXT                      context = WDF_NO_CONTEXT;
 
     UNREFERENCED_PARAMETER(OutputBufferLength);
     UNREFERENCED_PARAMETER(InputBufferLength);
@@ -556,10 +558,11 @@ Return Value:
     filterExt = FilterGetData(device);
 
     switch (IoControlCode) {
-
-    //
-    // Put your cases for handling IOCTLs here
-    //
+#if BLOCK_IOCTL_KS_READ_STREAM
+    case IOCTL_KS_READ_STREAM:
+        context = "IOCTL_KS_READ_STREAM";
+        break;
+#endif // BLOCK_IOCTL_KS_READ_STREAM
     }
 
     if (!NT_SUCCESS(status)) {
@@ -578,7 +581,8 @@ Return Value:
     // processing the IRP.
     //
         FilterForwardRequestWithCompletionRoutine(Request,
-                                               WdfDeviceGetIoTarget(device));
+                                               WdfDeviceGetIoTarget(device),
+                                               context);
 #else
         FilterForwardRequest(Request, WdfDeviceGetIoTarget(device));
 #endif
@@ -625,7 +629,8 @@ Routine Description:
 VOID
 FilterForwardRequestWithCompletionRoutine(
     IN WDFREQUEST Request,
-    IN WDFIOTARGET Target
+    IN WDFIOTARGET Target,
+    IN WDFCONTEXT Context
     )
 /*++
 Routine Description:
@@ -648,7 +653,7 @@ Routine Description:
 
     WdfRequestSetCompletionRoutine(Request,
                                 FilterRequestCompletionRoutine,
-                                WDF_NO_CONTEXT);
+                                Context);
 
     ret = WdfRequestSend(Request,
                          Target,
@@ -690,10 +695,34 @@ Return Value:
 
 --*/
 {
+#if BLOCK_IOCTL_KS_READ_STREAM
+    PIRP             Irp;
+    PKSSTREAM_HEADER pStreamHdr;
+    PUCHAR           pMdlBufferOut;
+#endif // BLOCK_IOCTL_KS_READ_STREAM
+
     UNREFERENCED_PARAMETER(Target);
     UNREFERENCED_PARAMETER(Context);
 
     //KdPrint(("[webcam-interception] status: 0x%x\n", CompletionParams->IoStatus.Status));
+
+#if BLOCK_IOCTL_KS_READ_STREAM
+    if (Context != WDF_NO_CONTEXT && CompletionParams->IoStatus.Status == STATUS_SUCCESS) {
+        Irp = WdfRequestWdmGetIrp(Request);
+        pStreamHdr = (PKSSTREAM_HEADER)Irp->AssociatedIrp.SystemBuffer;
+        if (pStreamHdr) {
+            if (Irp->MdlAddress) {
+                pMdlBufferOut = (PUCHAR)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+
+                // Fill the frame buffer with zero bytes.
+                RtlSecureZeroMemory(pMdlBufferOut, pStreamHdr->DataUsed);
+
+                // Set the frame size to zero.
+                pStreamHdr->DataUsed = 0;
+            }
+        }
+    }
+#endif // BLOCK_IOCTL_KS_READ_STREAM
 
     WdfRequestComplete(Request, CompletionParams->IoStatus.Status);
 
