@@ -26,6 +26,10 @@ Environment:
 #include <wdmsec.h> // for SDDLs
 #define NTSTRSAFE_LIB
 #include <ntstrsafe.h>
+#include <windef.h>
+#include <ks.h>
+#include <ksmedia.h>
+#include <guiddef.h>
 
 #if !defined(_FILTER_H_)
 #define _FILTER_H_
@@ -51,6 +55,7 @@ WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(FILTER_EXTENSION,
 
 DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_DEVICE_ADD FilterEvtDeviceAdd;
+EVT_WDFDEVICE_WDM_IRP_PREPROCESS FilterEvtIrpPreprocess;
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL FilterEvtIoDeviceControl;
 
 VOID

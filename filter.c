@@ -34,6 +34,14 @@ Environment:
 #endif
 
 
+const GUID GUID_PROPSETID_Topology = { STATIC_KSPROPSETID_Topology };
+const GUID GUID_PROPSETID_Pin = { STATIC_KSPROPSETID_Pin };
+const GUID GUID_PROPSETID_Stream = { STATIC_KSPROPSETID_Stream };
+const GUID GUID_PROPSETID_MemoryTransport = { STATIC_KSPROPSETID_MemoryTransport };
+const GUID GUID_PROPSETID_Connection = { STATIC_KSPROPSETID_Connection };
+const GUID GUID_PROPSETID_VidcapCameraControl = { STATIC_PROPSETID_VIDCAP_CAMERACONTROL };
+
+
 NTSTATUS
 DriverEntry(
     IN PDRIVER_OBJECT  DriverObject,
@@ -130,6 +138,9 @@ Return Value:
     NTSTATUS                status;
     WDFDEVICE               device;
     WDF_IO_QUEUE_CONFIG     ioQueueConfig;
+#if DBG
+    UCHAR                   majorFunction;
+#endif // DBG
 
     PAGED_CODE();
 
@@ -141,6 +152,22 @@ Return Value:
     // from the lower device you are attaching to.
     //
     WdfFdoInitSetFilter(DeviceInit);
+
+#if DBG
+    //
+    // Register the EvtDeviceWdmIrpPreprocess callback for logging.
+    //
+    for (majorFunction = IRP_MJ_CREATE; majorFunction <= IRP_MJ_MAXIMUM_FUNCTION; majorFunction++) {
+        status = WdfDeviceInitAssignWdmIrpPreprocessCallback(DeviceInit,
+            FilterEvtIrpPreprocess,
+            majorFunction,
+            NULL,
+            0);
+        if (!NT_SUCCESS(status)) {
+            KdPrint(("[webcam-interception] WdfDeviceInitAssignWdmIrpPreprocessCallback failed with status code 0x%x\n", status));
+        }
+    }
+#endif // DBG
 
     //
     // Specify the size of device extension where we track per device
@@ -186,6 +213,197 @@ Return Value:
 
     return status;
 }
+
+#if DBG
+
+VOID
+PrintGuidValues(LPCGUID lpGuid)
+{
+    KdPrint(("%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        lpGuid->Data1,
+        lpGuid->Data2,
+        lpGuid->Data3,
+        lpGuid->Data4[0],
+        lpGuid->Data4[1],
+        lpGuid->Data4[2],
+        lpGuid->Data4[3],
+        lpGuid->Data4[4],
+        lpGuid->Data4[5],
+        lpGuid->Data4[6],
+        lpGuid->Data4[7]));
+}
+
+VOID
+LogIoctlKsProperty(
+    IN PIRP Irp,
+    IN PIO_STACK_LOCATION currentStack
+)
+{
+    PKSIDENTIFIER Request = currentStack->Parameters.DeviceIoControl.Type3InputBuffer;
+
+    if (IsEqualGUID(&Request->Set, &GUID_PROPSETID_Topology)) {
+        KdPrint(("\trequest: Topology\n"));
+    }
+    else if (IsEqualGUID(&Request->Set, &GUID_PROPSETID_Pin)) {
+        KdPrint(("\trequest: Pin\n"));
+    }
+    else if (IsEqualGUID(&Request->Set, &GUID_PROPSETID_Stream)) {
+        KdPrint(("\trequest: Stream\n"));
+    }
+    else if (IsEqualGUID(&Request->Set, &GUID_PROPSETID_MemoryTransport)) {
+        KdPrint(("\trequest: MemoryTransport\n"));
+    }
+    else if (IsEqualGUID(&Request->Set, &GUID_PROPSETID_Connection)) {
+        KdPrint(("\trequest: Connection\n"));
+
+        switch (Request->Id) {
+        case KSPROPERTY_CONNECTION_STATE:               KdPrint(("\tKSPROPERTY_CONNECTION_STATE\n"));               break;
+        case KSPROPERTY_CONNECTION_PRIORITY:            KdPrint(("\tKSPROPERTY_CONNECTION_PRIORITY\n"));            break;
+        case KSPROPERTY_CONNECTION_DATAFORMAT:          KdPrint(("\tKSPROPERTY_CONNECTION_DATAFORMAT\n"));          break;
+        case KSPROPERTY_CONNECTION_ALLOCATORFRAMING:    KdPrint(("\tKSPROPERTY_CONNECTION_ALLOCATORFRAMING\n"));    break;
+        case KSPROPERTY_CONNECTION_PROPOSEDATAFORMAT:   KdPrint(("\tKSPROPERTY_CONNECTION_PROPOSEDATAFORMAT\n"));   break;
+        case KSPROPERTY_CONNECTION_ACQUIREORDERING:     KdPrint(("\tKSPROPERTY_CONNECTION_ACQUIREORDERING\n"));     break;
+        case KSPROPERTY_CONNECTION_ALLOCATORFRAMING_EX: KdPrint(("\tKSPROPERTY_CONNECTION_ALLOCATORFRAMING_EX\n")); break;
+        case KSPROPERTY_CONNECTION_STARTAT:             KdPrint(("\tKSPROPERTY_CONNECTION_STARTAT\n"));             break;
+        }
+
+        if (Request->Id == KSPROPERTY_CONNECTION_STATE) {
+            PKSSTATE pksState = Irp->UserBuffer;
+
+            if (Request->Flags == KSPROPERTY_TYPE_SET) {
+                switch (*pksState) {
+                case KSSTATE_STOP:
+                    KdPrint(("\tset type: KSSTATE_STOP\n"));
+                    break;
+
+                case KSSTATE_ACQUIRE:
+                    KdPrint(("\tset type: KSSTATE_ACQUIRE\n"));
+                    break;
+
+                case KSSTATE_PAUSE:
+                    KdPrint(("\tset type: KSSTATE_PAUSE\n"));
+                    break;
+
+                case KSSTATE_RUN:
+                    KdPrint(("\tset type: KSSTATE_RUN\n"));
+                    break;
+                }
+            }
+            else {
+                KdPrint(("\tflags: 0x%x\n", Request->Flags));
+            }
+        }
+    }
+    else {
+        KdPrint(("\trequest: "));
+        PrintGuidValues(&Request->Set);
+        KdPrint(("\n"));
+    }
+}
+
+VOID
+LogDeviceControlIrp(
+    IN PIRP Irp,
+    IN PIO_STACK_LOCATION currentStack
+)
+{
+    LPSTR ioctl;
+
+    ioctl = NULL;
+    switch (currentStack->Parameters.DeviceIoControl.IoControlCode) {
+    case IOCTL_KS_READ_STREAM:  ioctl = "IOCTL_KS_READ_STREAM";        break;
+    case IOCTL_KS_WRITE_STREAM: ioctl = "IOCTL_KS_WRITE_STREAM";       break;
+    case IOCTL_KS_PROPERTY:     ioctl = "IOCTL_KS_PROPERTY";           break;
+    case IOCTL_KS_METHOD:       ioctl = "IOCTL_KS_METHOD";             break;
+    case IOCTL_KS_ENABLE_EVENT: ioctl = "IOCTL_KS_ENABLE_EVENT";       break;
+    }
+
+    if (ioctl) {
+        KdPrint(("\tioctl: %s\n", ioctl));
+    }
+    else {
+        KdPrint(("\tioctl: 0x%x\n", currentStack->Parameters.DeviceIoControl.IoControlCode));
+    }
+
+    switch (currentStack->Parameters.DeviceIoControl.IoControlCode) {
+    case IOCTL_KS_PROPERTY:     LogIoctlKsProperty(Irp, currentStack); break;
+    }
+}
+
+VOID
+LogCreateIrp(
+    IN PIO_STACK_LOCATION currentStack
+)
+{
+    USHORT i;
+
+    KdPrint(("\tfilename:"));
+
+    for (i = 0; i < currentStack->FileObject->FileName.Length / 2; i++) {
+        KdPrint((" %02X", LOBYTE(currentStack->FileObject->FileName.Buffer[i])));
+        KdPrint((" %02X", HIBYTE(currentStack->FileObject->FileName.Buffer[i])));
+    }
+
+    KdPrint(("\n"));
+}
+
+NTSTATUS
+FilterEvtIrpPreprocess(
+    IN WDFDEVICE Device,
+    PIRP Irp
+)
+{
+    PIO_STACK_LOCATION currentStack;
+    LPSTR              major;
+
+    currentStack = IoGetCurrentIrpStackLocation(Irp);
+
+    major = "???";
+    switch (currentStack->MajorFunction) {
+    case IRP_MJ_CREATE:                   major = "IRP_MJ_CREATE";                     break;
+    case IRP_MJ_CREATE_NAMED_PIPE:        major = "IRP_MJ_CREATE_NAMED_PIPE";          break;
+    case IRP_MJ_CLOSE:                    major = "IRP_MJ_CLOSE";                      break;
+    case IRP_MJ_READ:                     major = "IRP_MJ_READ";                       break;
+    case IRP_MJ_WRITE:                    major = "IRP_MJ_WRITE";                      break;
+    case IRP_MJ_QUERY_INFORMATION:        major = "IRP_MJ_QUERY_INFORMATION";          break;
+    case IRP_MJ_SET_INFORMATION:          major = "IRP_MJ_SET_INFORMATION";            break;
+    case IRP_MJ_QUERY_EA:                 major = "IRP_MJ_QUERY_EA";                   break;
+    case IRP_MJ_SET_EA:                   major = "IRP_MJ_SET_EA";                     break;
+    case IRP_MJ_FLUSH_BUFFERS:            major = "IRP_MJ_FLUSH_BUFFERS";              break;
+    case IRP_MJ_QUERY_VOLUME_INFORMATION: major = "IRP_MJ_QUERY_VOLUME_INFORMATION";   break;
+    case IRP_MJ_SET_VOLUME_INFORMATION:   major = "IRP_MJ_SET_VOLUME_INFORMATION";     break;
+    case IRP_MJ_DIRECTORY_CONTROL:        major = "IRP_MJ_DIRECTORY_CONTROL";          break;
+    case IRP_MJ_FILE_SYSTEM_CONTROL:      major = "IRP_MJ_FILE_SYSTEM_CONTROL";        break;
+    case IRP_MJ_DEVICE_CONTROL:           major = "IRP_MJ_DEVICE_CONTROL";             break;
+    case IRP_MJ_INTERNAL_DEVICE_CONTROL:  major = "IRP_MJ_INTERNAL_DEVICE_CONTROL";    break;
+    case IRP_MJ_SHUTDOWN:                 major = "IRP_MJ_SHUTDOWN";                   break;
+    case IRP_MJ_LOCK_CONTROL:             major = "IRP_MJ_LOCK_CONTROL";               break;
+    case IRP_MJ_CLEANUP:                  major = "IRP_MJ_CLEANUP";                    break;
+    case IRP_MJ_CREATE_MAILSLOT:          major = "IRP_MJ_CREATE_MAILSLOT";            break;
+    case IRP_MJ_QUERY_SECURITY:           major = "IRP_MJ_QUERY_SECURITY";             break;
+    case IRP_MJ_SET_SECURITY:             major = "IRP_MJ_SET_SECURITY";               break;
+    case IRP_MJ_POWER:                    major = "IRP_MJ_POWER";                      break;
+    case IRP_MJ_SYSTEM_CONTROL:           major = "IRP_MJ_SYSTEM_CONTROL";             break;
+    case IRP_MJ_DEVICE_CHANGE:            major = "IRP_MJ_DEVICE_CHANGE";              break;
+    case IRP_MJ_QUERY_QUOTA:              major = "IRP_MJ_QUERY_QUOTA";                break;
+    case IRP_MJ_SET_QUOTA:                major = "IRP_MJ_SET_QUOTA";                  break;
+    case IRP_MJ_PNP:                      major = "IRP_MJ_PNP";                        break;
+    }
+
+    if (major) {
+        KdPrint(("[webcam-interception] major: %s\n", major));
+    }
+
+    switch (currentStack->MajorFunction) {
+    case IRP_MJ_CREATE:                   LogCreateIrp(currentStack);                  break;
+    case IRP_MJ_DEVICE_CONTROL:           LogDeviceControlIrp(Irp, currentStack);      break;
+    }
+
+    IoSkipCurrentIrpStackLocation(Irp);
+    return WdfDeviceWdmDispatchPreprocessedIrp(Device, Irp);
+}
+
+#endif // DBG
 
 VOID
 FilterEvtIoDeviceControl(
@@ -371,6 +589,8 @@ Return Value:
 {
     UNREFERENCED_PARAMETER(Target);
     UNREFERENCED_PARAMETER(Context);
+
+    //KdPrint(("[webcam-interception] status: 0x%x\n", CompletionParams->IoStatus.Status));
 
     WdfRequestComplete(Request, CompletionParams->IoStatus.Status);
 
