@@ -28,6 +28,9 @@ Environment:
 #include "filter.h"
 
 
+#define BLOCK_IOCTL_KS_PROPERTY 1
+
+
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text (INIT, DriverEntry)
 #pragma alloc_text (PAGE, FilterEvtDeviceAdd)
@@ -168,6 +171,11 @@ Return Value:
         }
     }
 #endif // DBG
+
+    //
+    // Register the EvtIoInCallerContext callback to deal with IOCTLs that need to stay in original context.
+    //
+    WdfDeviceInitSetIoInCallerContextCallback(DeviceInit, FilterEvtIoInCallerContext);
 
     //
     // Specify the size of device extension where we track per device
@@ -404,6 +412,101 @@ FilterEvtIrpPreprocess(
 }
 
 #endif // DBG
+
+VOID
+FilterEvtIoInCallerContext(
+    IN WDFDEVICE Device,
+    IN WDFREQUEST Request
+)
+{
+#if BLOCK_IOCTL_KS_PROPERTY
+    size_t                          inBufLen, outBufLen;
+    PVOID                           inBuf, outBuf;
+    WDFMEMORY                       InputMemoryBuffer, OutputMemoryBuffer;
+    PKSIDENTIFIER                   pKSIdent;
+    PKSSTATE                        pKSState;
+#endif // BLOCK_IOCTL_KS_PROPERTY
+
+    WDF_REQUEST_PARAMETERS          params;
+    NTSTATUS                        status = STATUS_SUCCESS;
+
+    WDF_REQUEST_PARAMETERS_INIT(&params);
+    WdfRequestGetParameters(Request, &params);
+
+#if BLOCK_IOCTL_KS_PROPERTY
+    if (params.Type == WdfRequestTypeDeviceControl &&
+        params.Parameters.DeviceIoControl.IoControlCode == IOCTL_KS_PROPERTY) {
+        //
+        // The I/O control code is METHOD_NEITHER.
+        // First, retrieve the virtual addresses of
+        // the input buffer.
+        //
+        status = WdfRequestRetrieveUnsafeUserInputBuffer(Request, sizeof(KSIDENTIFIER), &inBuf, &inBufLen);
+        if (!NT_SUCCESS(status)) {
+            goto Error;
+        }
+
+        //
+        // Next, probe and lock the read buffer.
+        //
+        status = WdfRequestProbeAndLockUserBufferForRead(Request, inBuf, inBufLen, &InputMemoryBuffer);
+        if (!NT_SUCCESS(status)) {
+            goto Error;
+        }
+
+        pKSIdent = WdfMemoryGetBuffer(InputMemoryBuffer, NULL);
+
+        if (IsEqualGUID(&pKSIdent->Set, &GUID_PROPSETID_Connection)) {
+            if (pKSIdent->Id == KSPROPERTY_CONNECTION_STATE) {
+                if (pKSIdent->Flags & KSPROPERTY_TYPE_SET) {
+                    status = WdfRequestRetrieveUnsafeUserOutputBuffer(Request, sizeof(KSSTATE), &outBuf, &outBufLen);
+                    if(!NT_SUCCESS(status)) {
+                        goto Error;
+                    }
+
+                    //
+                    // Note: even though it's an output buffer,
+                    // we're going to read from it, that's how
+                    // IOCTL_KS_PROPERTY works.
+                    //
+                    status = WdfRequestProbeAndLockUserBufferForRead(Request, outBuf, outBufLen, &OutputMemoryBuffer);
+                    if(!NT_SUCCESS(status)) {
+                        goto Error;
+                    }
+
+                    pKSState = WdfMemoryGetBuffer(OutputMemoryBuffer, NULL);
+
+                    switch(*pKSState) {
+                    case KSSTATE_ACQUIRE:
+                        status = STATUS_INSUFFICIENT_RESOURCES;
+                        break;
+
+                    case KSSTATE_RUN:
+                        status = STATUS_ACCESS_DENIED;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!NT_SUCCESS(status)) {
+            goto Error;
+        }
+    }
+#endif // BLOCK_IOCTL_KS_PROPERTY
+
+    status = WdfDeviceEnqueueRequest(Device, Request);
+    if (!NT_SUCCESS(status)) {
+        KdPrint(("[webcam-interception] WdfDeviceEnqueueRequest failed: %s\n", status));
+        goto Error;
+    }
+
+    return;
+
+Error:
+
+    WdfRequestComplete(Request, status);
+}
 
 VOID
 FilterEvtIoDeviceControl(
