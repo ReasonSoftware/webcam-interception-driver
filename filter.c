@@ -13,11 +13,11 @@ Module Name:
 
 Abstract:
 
-    This module shows how to a write a generic filter driver. The driver demonstrates how 
-    to support device I/O control requests through queues. All the I/O requests passed on to 
-    the lower driver. This filter driver shows how to handle IRP postprocessing by forwarding 
+    This module shows how to a write a generic filter driver. The driver demonstrates how
+    to support device I/O control requests through queues. All the I/O requests passed on to
+    the lower driver. This filter driver shows how to handle IRP postprocessing by forwarding
     the requests with and without a completion routine. To forward with a completion routine
-    set the define FORWARD_REQUEST_WITH_COMPLETION to 1. 
+    set the define FORWARD_REQUEST_WITH_COMPLETION to 1.
 
 Environment:
 
@@ -64,10 +64,10 @@ Return Value:
     NTSTATUS            status;
     WDFDRIVER           hDriver;
 
-    KdPrint(("Toaster Generic Filter Driver Sample - Driver Framework Edition.\n"));
+    KdPrint(("[webcam-interception] Driver Sample\n"));
 
     //
-    // Initiialize driver config to control the attributes that
+    // Initialize driver config to control the attributes that
     // are global to the driver. Note that framework by default
     // provides a driver unload routine. If you create any resources
     // in the DriverEntry and want to be cleaned in driver unload,
@@ -90,9 +90,9 @@ Return Value:
                             &config,
                             &hDriver);
     if (!NT_SUCCESS(status)) {
-        KdPrint( ("WdfDriverCreate failed with status 0x%x\n", status));
+        KdPrint(("[webcam-interception] WdfDriverCreate failed with status 0x%x\n", status));
     }
-    
+
     return status;
 }
 
@@ -128,16 +128,16 @@ Return Value:
     WDF_OBJECT_ATTRIBUTES   deviceAttributes;
     PFILTER_EXTENSION       filterExt;
     NTSTATUS                status;
-    WDFDEVICE               device;    
+    WDFDEVICE               device;
     WDF_IO_QUEUE_CONFIG     ioQueueConfig;
 
-    PAGED_CODE ();
+    PAGED_CODE();
 
     UNREFERENCED_PARAMETER(Driver);
 
     //
     // Tell the framework that you are filter driver. Framework
-    // takes care of inherting all the device flags & characterstics
+    // takes care of inheriting all the device flags & characteristics
     // from the lower device you are attaching to.
     //
     WdfFdoInitSetFilter(DeviceInit);
@@ -148,22 +148,22 @@ Return Value:
     //
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, FILTER_EXTENSION);
-    
+
     //
-    // Create a framework device object.This call will inturn create
+    // Create a framework device object. This call will inturn create
     // a WDM deviceobject, attach to the lower stack and set the
     // appropriate flags and attributes.
     //
     status = WdfDeviceCreate(&DeviceInit, &deviceAttributes, &device);
     if (!NT_SUCCESS(status)) {
-        KdPrint( ("WdfDeviceCreate failed with status code 0x%x\n", status));
+        KdPrint(("[webcam-interception] WdfDeviceCreate failed with status code 0x%x\n", status));
         return status;
     }
 
     filterExt = FilterGetData(device);
 
     //
-    // Configure the default queue to be Parallel. 
+    // Configure the default queue to be Parallel.
     //
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&ioQueueConfig,
                              WdfIoQueueDispatchParallel);
@@ -180,9 +180,9 @@ Return Value:
                             WDF_NO_HANDLE // pointer to default queue
                             );
     if (!NT_SUCCESS(status)) {
-        KdPrint( ("WdfIoQueueCreate failed 0x%x\n", status));
+        KdPrint(("[webcam-interception] WdfIoQueueCreate failed 0x%x\n", status));
         return status;
-    }   
+    }
 
     return status;
 }
@@ -200,7 +200,7 @@ FilterEvtIoDeviceControl(
 Routine Description:
 
     This routine is the dispatch routine for internal device control requests.
-    
+
 Arguments:
 
     Queue - Handle to the framework queue object that is associated
@@ -228,7 +228,7 @@ Return Value:
     UNREFERENCED_PARAMETER(OutputBufferLength);
     UNREFERENCED_PARAMETER(InputBufferLength);
 
-    KdPrint(("Entered FilterEvtIoDeviceControl\n"));
+    //KdPrint(("[webcam-interception] Entered FilterEvtIoDeviceControl\n"));
 
     device = WdfIoQueueGetDevice(Queue);
 
@@ -240,7 +240,7 @@ Return Value:
     // Put your cases for handling IOCTLs here
     //
     }
-    
+
     if (!NT_SUCCESS(status)) {
         WdfRequestComplete(Request, status);
         return;
@@ -256,9 +256,9 @@ Return Value:
     // Use this routine to forward a request if you are interested in post
     // processing the IRP.
     //
-        FilterForwardRequestWithCompletionRoutine(Request, 
+        FilterForwardRequestWithCompletionRoutine(Request,
                                                WdfDeviceGetIoTarget(device));
-#else   
+#else
         FilterForwardRequest(Request, WdfDeviceGetIoTarget(device));
 #endif
 
@@ -282,7 +282,7 @@ Routine Description:
     NTSTATUS status;
 
     //
-    // We are not interested in post processing the IRP so 
+    // We are not interested in post processing the IRP so
     // fire and forget.
     //
     WDF_REQUEST_SEND_OPTIONS_INIT(&options,
@@ -291,8 +291,8 @@ Routine Description:
     ret = WdfRequestSend(Request, Target, &options);
 
     if (ret == FALSE) {
-        status = WdfRequestGetStatus (Request);
-        KdPrint( ("WdfRequestSend failed: 0x%x\n", status));
+        status = WdfRequestGetStatus(Request);
+        KdPrint(("[webcam-interception] WdfRequestSend failed: 0x%x\n", status));
         WdfRequestComplete(Request, status);
     }
 
@@ -320,8 +320,8 @@ Routine Description:
     NTSTATUS status;
 
     //
-    // The following funciton essentially copies the content of
-    // current stack location of the underlying IRP to the next one. 
+    // The following function essentially copies the content of
+    // current stack location of the underlying IRP to the next one.
     //
     WdfRequestFormatRequestUsingCurrentType(Request);
 
@@ -334,8 +334,8 @@ Routine Description:
                          WDF_NO_SEND_OPTIONS);
 
     if (ret == FALSE) {
-        status = WdfRequestGetStatus (Request);
-        KdPrint( ("WdfRequestSend failed: 0x%x\n", status));
+        status = WdfRequestGetStatus(Request);
+        KdPrint(("[webcam-interception] WdfRequestSend failed: 0x%x\n", status));
         WdfRequestComplete(Request, status);
     }
 
@@ -378,7 +378,3 @@ Return Value:
 }
 
 #endif //FORWARD_REQUEST_WITH_COMPLETION
-
-
-
-

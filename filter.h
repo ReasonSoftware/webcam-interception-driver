@@ -13,7 +13,7 @@ Module Name:
 
 Abstract:
 
-    Contains structure definitions and function prototypes for a generic filter driver.	
+    Contains structure definitions and function prototypes for a generic filter driver.
 
 Environment:
 
@@ -30,8 +30,6 @@ Environment:
 #if !defined(_FILTER_H_)
 #define _FILTER_H_
 
-
-#define DRIVERNAME "Generic.sys: "
 
 //
 // Change the following define to 1 if you want to forward
